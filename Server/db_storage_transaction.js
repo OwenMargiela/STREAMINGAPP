@@ -9,6 +9,9 @@ const mongodb_URI = process.env.MONGODB_URI;
 const accountName = process.env.ACCOUNT_NAME;
 const sasToken = process.env.SAS_TOKEN;
 const containerName = process.env.CONTAINER_NAME;
+//console.log("SAS: ", sasToken)
+
+//const containerClient = AZURE.BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING).getContainerClient(process.env.containerName);
 
 const blobServiceClient = new AZURE.BlobServiceClient(
     `https://${accountName}.blob.core.windows.net?${sasToken}`
@@ -40,39 +43,40 @@ async function connect_to_DB(mongoClient) {
 
 }
 
+/*
 async function upload_mongo_db(url, user, title, description) {
     console.log(`Video url: ${url}`)
     console.log(`connecting\ntrying to insert ${user}`)
     await mongoose.connect(mongodb_URI)
     if (mongoose.connection.readyState === 1) {
         console.log('Mongoose connection is open.');
-
+        
         try {
 
-            const { VideoMetadataRef, Comment } = require("./mongoose/data_models")
-            const newVideo = new VideoMetadataRef({
-                number_of_likes: 0,
-                number_of_dislikes: 0,
-                comment_section_ID: 'comment123',
-                title: title,
+        const { VideoMetadataRef, Comment } = require("./mongoose/data_models")
+        const newVideo = new VideoMetadataRef({
+            number_of_likes: 0,
+            number_of_dislikes: 0,
+            comment_section_ID: 'comment123',
+            title: title,
                 description: description,
                 author: user,
                 length: 300,
                 video_ID: new mongoose.Types.ObjectId(),
                 URL: url
             });
-
+            
             // Save the video
             await newVideo.save();
-
+            
             console.log('New video created successfully:', newVideo);
-
-
+            
+            
         } catch (error) {
             console.log(`${error}\n`);
             const parts = url.split("/")
             const parsedBlobnameVal = parts[4]
-
+            
             console.log(`Deleting ${parsedBlobnameVal}`)
 
             blobClient = containerClient.getBlockBlobClient(parsedBlobnameVal)
@@ -83,13 +87,15 @@ async function upload_mongo_db(url, user, title, description) {
             console.log('Closing connection')
             mongoose.connection.close()
         }
-
+        
     } else {
         console.log('Mongoose connection is not open.');
 
     }
 
 }
+*/
+
 
 /**
  * 
@@ -98,7 +104,10 @@ async function upload_mongo_db(url, user, title, description) {
  * @param {string} dest 
  * @returns {string}
  */
-async function upload_by_chunks(filename, buffer, dest) {
+async function upload_by_chunks(filename, buffer) {
+    if (!containerClient) {
+        console.log("Something weird Happend")
+    }
     buffer = Buffer.from(buffer)
     console.log(buffer instanceof Buffer);
 
@@ -135,10 +144,10 @@ function generateID(blockNumber) {
 
 
 module.exports = {
-    blobServiceClient,
+    //blobServiceClient,
     containerClient,
     connect_to_DB,
     upload_by_chunks,
     client,
-    upload_mongo_db,
+    //upload_mongo_db,
 }

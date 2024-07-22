@@ -3,12 +3,12 @@ require('dotenv').config();
 const { EventHubConsumerClient, earliestEventPosition, latestEventPosition } = require("@azure/event-hubs");
 const { fullPipeline } = require('./audioController.js');
 
-const connectionString = String(process.env.CONNECTIONSTRING);
+//const connectionString = String(process.env.CONNECTIONSTRING);
 const eventHubName = "urls";
 const consumerGroup = EventHubConsumerClient.defaultConsumerGroupName;
 
 async function receiveMessages() {
-    const consumerClient = new EventHubConsumerClient(consumerGroup, connectionString, eventHubName);
+    const consumerClient = new EventHubConsumerClient(consumerGroup, process.env.CONNECTIONSTRING, eventHubName);
 
     consumerClient.subscribe({
         processEvents: async (events, context) => {
@@ -19,10 +19,15 @@ async function receiveMessages() {
                     eventData = event.body.toString(); // Fall back to string if JSON parsing fails
                 }
 
-                console.log(`Received event: ${eventData}`);
-                console.log('Executing Pipeline')
-                const metaData = fullPipeline(eventData)
-                metaData.filename
+                console.log(`Received event: ${event.body}`);
+                if (event.body === undefined) {
+                    console.log("event data is undefined, Pipeline will not be executed")
+                }
+                else {
+                    console.log('Executing Pipeline')
+                    const metaData = fullPipeline(event.body)
+                    console.log("Filname: ", metaData.filename)
+                }
 
             }
         },

@@ -12,7 +12,13 @@ require('dotenv').config()
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const cognitiveService = require('microsoft-cognitiveservices-speech-sdk');
-const containerClient = _AZURE.BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING).getContainerClient(process.env.AUDIO_CONTAINER_NAME);
+
+const blobServiceClient = new _AZURE.BlobServiceClient(
+    `https://${process.env.ACCOUNT_NAME}.blob.core.windows.net?${process.env.SAS_TOKEN}`
+
+)
+
+const containerClient = blobServiceClient.getContainerClient(process.env.AUDIO_CONTAINER_NAME)
 
 /**
  * @class
@@ -201,7 +207,7 @@ async function transcribeAudio(stream) {
 
         recognizer.recognized = (sender, event) => {
             if (event.result.reason === cognitiveService.ResultReason.RecognizedSpeech) {
-                results.push(events.result)
+                results.push(event.result)
             }
         }
         recognizer.sessionStopped = (sender, event) => {
@@ -229,14 +235,27 @@ async function transcribeAudio(stream) {
  */
 async function fullPipeline(eventData) {
     console.log('In Pipeline')
-    let url = eventData.slice(1, -1); // Remove first and last character (double quotes)
+    let url = eventData
+    console.log(url)
     let dest = 'audio'
     console.log('Dest:', dest)
 
     try {
+        const https = require('https')
+        const readStream = new PassThrough()
 
-        const { data } = await axios.get(url, { responseType: 'stream' });
-        const audioStream = extractAudio(data);
+        https.get(url, (res) => {
+            res.pipe(readStream);
+            readStream.on('finish', () => {
+                console.log("File Downloded")
+            }).on('error', (err) => {
+                console.error('Error downloading file:', err)
+            })
+        })
+        //const response = await axios.get(url, { responseType: "stream" });
+        //console.log("Response: ", response.data)
+
+        const audioStream = extractAudio(readStream);
 
         if (audioStream) {
             const urlparts = url.split('/')[4].split("")

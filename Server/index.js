@@ -18,9 +18,13 @@ const eventHubName = "urls";
  */
 async function sendMessage(url) {
     const producer = new EventHubProducerClient(process.env.CONNECTIONSTRING, eventHubName);
+    if (!producer) {
+        console.log("Something weird happened in the producer function")
+    }
 
     try {
         const batch = await producer.createBatch();
+        console.log("Sending: ", url)
         batch.tryAdd({ body: url });
 
         await producer.sendBatch(batch);
