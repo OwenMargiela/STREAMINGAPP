@@ -188,11 +188,44 @@ async function downloadAudioFromAzure(blobname) {
 
 /**
  * @param {NodeJS.ReadableStream} stream
- * @returns {Promise<cognitiveService.SpeakerRecognitionResult>}
+ * @returns {Promise<cognitiveService.SpeechRecognitionResult[]>}
  */
 async function transcribeAudio(stream) {
+    console.log(`Type of Stream: ${stream.constructor.name} `)
+    console.log(`Service Key: ${process.env.SPEECH_SERVICE_KEY}\nRegion: ${process.env.REGION}\nAudio: ${process.env.AUDIO_CONTAINER_NAME}`)
     const speechConfig = cognitiveService.SpeechConfig.fromSubscription(process.env.SPEECH_SERVICE_KEY, process.env.REGION)
-    const audioConfig = cognitiveService.AudioConfig.fromStreamInput(stream)
+    const pushStream = cognitiveService.AudioInputStream.createPushStream()
+
+    let totalSize = 30216270; // Track total size
+    let receivedSize = 0; // Track received size
+
+    const updateStreamingProgress = () => {
+        if (totalSize > 0) {
+            const percentage = Math.round((receivedSize / totalSize) * 100);
+            process.stdout.write(`\rStreaming Progress: ${percentage}% (${receivedSize} bytes)`);
+        }
+    };
+
+    stream.on('data', (chunk) => {
+        pushStream.write(chunk);
+        receivedSize += chunk.length;
+        updateStreamingProgress();
+        // Update progress
+    });
+
+    stream.on('end', () => {
+        pushStream.close();
+        console.log('\nDownload complete');
+        process.stdout.write(`\rStreaming complete. Total size: ${receivedSize} bytes\n`)
+    });
+
+    // Get total size of the stream (if possible)
+    stream.on('response', (response) => {
+        totalSize = parseInt(response.headers['content-length'], 10);
+    });
+
+
+    const audioConfig = cognitiveService.AudioConfig.fromStreamInput(pushStream)
 
     speechConfig.outputFormat = cognitiveService.OutputFormat.Detailed
 
@@ -202,20 +235,25 @@ async function transcribeAudio(stream) {
         const results = []
 
         recognizer.recognizing = (s, e) => {
+            console.log("Recognizing")
             results.push(e.result);
         };
 
         recognizer.recognized = (sender, event) => {
+            process.stdout.write(`\rRecognition in progress...`);
             if (event.result.reason === cognitiveService.ResultReason.RecognizedSpeech) {
+                console.log('Recognized:', event.result.text);
                 results.push(event.result)
             }
         }
         recognizer.sessionStopped = (sender, event) => {
+            console.log('\nRecognition session stopped.');
             resolve(results)
             recognizer.close
 
         }
         recognizer.canceled = (sender, event) => {
+            console.error('\nRecognition canceled:', event);
             reject(event)
             recognizer.close()
         }
@@ -226,13 +264,66 @@ async function transcribeAudio(stream) {
     })
 
 }
+/**
+ * @param {cognitiveService.SpeakerRecognitionResult} transcription
+ * @returns {string}
+ */
+
+function convertToWebVtt(transcription) {
+    console.log(`TRANSCRIPTION:\n${transcription}`)
+
+    let vttContent = "WEBVTT\n\n";
+
+    const startTime = new Date(result.offset / 10000).toISOString().substr(11, 12).replace('.', ',');
+    const endTime = new Date((result.offset + result.duration) / 10000).toISOString().substr(11, 12).replace('.', ',');
+    vttContent += `0\n${startTime} --> ${endTime}\n${result.text}\n\n`;
+
+    return vttContent;
+
+
+}
+
+
+/**
+ * @param {string} blobname
+ * @return {string}
+ */
+
+async function convertPipeline(blobname) {
+    const audioStream = await downloadAudioFromAzure(blobname)
+    const recognitionResult = await transcribeAudio(audioStream)
+    console.log(recognitionResult)
+    const vttContent = convertToWebVtt(recognitionResult)
+    console.log(vttContent)
+    return vttContent
+
+}
+
+// Check if the script is run directly from the command line
+if (require.main === module) {
+    // Get the command-line arguments
+    const args = process.argv.slice(2);
+
+    if (args.length !== 1) {
+        console.error('Usage: node script.js <blobname>');
+        process.exit(1);
+    }
+
+    // Call the function with the provided argument
+    convertPipeline(args[0])
+        .then(() => console.log('Processing complete.'))
+        .catch(err => console.error('Error:', err));
+}
+
+
+
 
 
 /**
  *
- *@param {string} eventData Event produced by the eventhub stream containing the url of the image/media/media
- *@return {FileMetaData | undefined}
- */
+*@param {string} eventData Event produced by the eventhub stream containing the url of the image/media/media
+*@return {FileMetaData | undefined}
+*/
 async function fullPipeline(eventData) {
     console.log('In Pipeline')
     let url = eventData
@@ -284,5 +375,8 @@ function generateID(blockNumber) {
 }
 
 module.exports = {
-    fullPipeline
+    fullPipeline,
+    convertPipeline
+
 }
+//makeRunnable();
