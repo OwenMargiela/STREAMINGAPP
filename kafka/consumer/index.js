@@ -26,7 +26,7 @@ async function receiveMessages() {
                 else {
                     console.log('Executing Pipeline')
                     const metaData = fullPipeline(event.body)
-                    console.log("Filname: ", metaData.filename)
+                    //console.log("Filname: ", metaData.filename)
                 }
 
             }

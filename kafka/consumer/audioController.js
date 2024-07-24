@@ -107,6 +107,8 @@ function extractAudio(input) {
 
     ffmpeg(input)
         .audioCodec('pcm_s16le')
+        .audioFrequency(16000)
+        .audioChannels(1)
         .format('wav')
         .on('end', () => {
             console.log('Audio extraction complete.');
@@ -180,9 +182,29 @@ async function downloadFromStream(stream) {
  * @returns {Promise<NodeJS.ReadableStream>}
  */
 async function downloadAudioFromAzure(blobname) {
+    const { decode } = require('wav-decoder');
+
     const blockBlobClient = containerClient.getBlobClient(blobname)
     const blobresponse = await blockBlobClient.download(0)
-    return blobresponse.readableStreamBody
+
+    const chunks = [];
+    const stream = blobresponse.readableStreamBody;
+
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('end', async () => {
+        const buffer = Buffer.concat(chunks);
+        try {
+            const wavData = await decode(buffer);
+            console.log('Audio Format:', wavData.sampleRate, 'Hz');
+            console.log('Channels:', wavData.channelData.length);
+            console.log('Bit Depth:', wavData.bitDepth);
+        } catch (err) {
+            console.error('Error decoding WAV file:', err);
+        }
+    });
+    stream.on('error', (err) => console.error('Error reading stream:', err));
+
+    return blobresponse.readableStreamBody;
 }
 
 
@@ -196,7 +218,7 @@ async function transcribeAudio(stream) {
     const speechConfig = cognitiveService.SpeechConfig.fromSubscription(process.env.SPEECH_SERVICE_KEY, process.env.REGION)
     const pushStream = cognitiveService.AudioInputStream.createPushStream()
 
-    let totalSize = 30216270; // Track total size
+    let totalSize = 0; // Track total size
     let receivedSize = 0; // Track received size
 
     const updateStreamingProgress = () => {
@@ -228,34 +250,62 @@ async function transcribeAudio(stream) {
     const audioConfig = cognitiveService.AudioConfig.fromStreamInput(pushStream)
 
     speechConfig.outputFormat = cognitiveService.OutputFormat.Detailed
+    speechConfig.requestWordLevelTimestamps()
+    speechConfig.setProperty(cognitiveService.PropertyId.SpeechServiceResponse_StablePartialResultThreshold = 5)
 
     const recognizer = new cognitiveService.SpeechRecognizer(speechConfig, audioConfig)
 
     return new Promise((resolve, reject) => {
-        const results = []
+        let results = new Array(new cognitiveService.SpeechRecognitionResult)
 
         recognizer.recognizing = (s, e) => {
-            console.log("Recognizing")
-            results.push(e.result);
+
+            //const startTime = new Date(e.offset / 10000).toISOString().substr(11, 12).replace('.', ',');
+
+            //const endTime = new Date((e.offset + result.duration) / 10000).toISOString().substr(11, 12).replace('.', ',');
+
+            //console.log(`${e.offset}\n\n${startTime} --> ${endTime}\n\n Intermediate: ${e.result.text}\n\n`);
+
+            //console.log(`${(e.offset / 10000).toString()}\n\nIntermediate: ${e.result.text}\n\n`);
+
+            results.push(e.result)
         };
 
         recognizer.recognized = (sender, event) => {
             process.stdout.write(`\rRecognition in progress...`);
             if (event.result.reason === cognitiveService.ResultReason.RecognizedSpeech) {
-                console.log('Recognized:', event.result.text);
-                results.push(event.result)
+                console.log('\n\nRecognized:', event.result.text);
+                //console.log(JSON.parse(event.result.json).NBest[0].Words)
+
+                const wordLevelTimestamps = JSON.parse(event.result.json).NBest[0].Words;
+                console.log(wordLevelTimestamps)
+                const optimizedCaptions = optimizeCaptions(wordLevelTimestamps);
+                results = results.concat(optimizedCaptions);
+
+                console.log('Optimized Captions:');
+                console.log(JSON.stringify(optimizedCaptions, null, 2));
+
+                //results.push(event.result)
             }
         }
         recognizer.sessionStopped = (sender, event) => {
             console.log('\nRecognition session stopped.');
+            recognizer.stopContinuousRecognitionAsync
             resolve(results)
-            recognizer.close
 
         }
         recognizer.canceled = (sender, event) => {
             console.error('\nRecognition canceled:', event);
-            reject(event)
-            recognizer.close()
+            //console.log("Transcription")
+            //results.forEach(res => {
+            //    console.log(res.text)
+            //})
+            if (results.length > 0) {
+                resolve(results);
+            } else {
+                reject(event);
+            }
+            recognizer.stopContinuousRecognitionAsync;
         }
         recognizer.startContinuousRecognitionAsync()
 
@@ -265,22 +315,87 @@ async function transcribeAudio(stream) {
 
 }
 /**
- * @param {cognitiveService.SpeakerRecognitionResult} transcription
+ * @param {cognitiveService.SpeechRecognitionResult[]} results
  * @returns {string}
  */
 
-function convertToWebVtt(transcription) {
-    console.log(`TRANSCRIPTION:\n${transcription}`)
-
+function convertToWebVtt(results) {
+    //console.log(`TRANSCRIPTION:\n${transcription}`)
+    //let lineNum = 0
     let vttContent = "WEBVTT\n\n";
 
-    const startTime = new Date(result.offset / 10000).toISOString().substr(11, 12).replace('.', ',');
-    const endTime = new Date((result.offset + result.duration) / 10000).toISOString().substr(11, 12).replace('.', ',');
-    vttContent += `0\n${startTime} --> ${endTime}\n${result.text}\n\n`;
+    results.forEach((result, i) => {
+
+        const offset = Number(result.offset);
+        const duration = Number(result.duration);
+
+        if (isNaN(offset) || isNaN(duration)) {
+            console.error('Invalid offset or duration:', result);
+            return;
+        }
+
+        const startTime = new Date(result.offset / 10000).toISOString().substr(11, 12).replace('.', ',');
+        const endTime = new Date((result.offset + result.duration) / 10000).toISOString().substr(11, 12).replace('.', ',');
+        vttContent += `${i}\n${startTime} --> ${endTime}\n${result.text}\n\n`;
+    })
 
     return vttContent;
 
 
+}
+
+/**
+ * @typedef {Object} Word
+ * @property {number} offset - The offset of the word in ticks (1 tick = 100 nanoseconds)
+ * @property {number} duration - The duration of the word in ticks
+ * @property {string} text - The text of the word
+ */
+
+/**
+ * @typedef {Object} Caption
+ * @property {string} text - The text of the caption
+ * @property {number} start - The start time of the caption in seconds
+ * @property {number} end - The end time of the caption in seconds
+ */
+
+/**
+ * Optimizes captions based on word-level timestamps
+ * @param {Word[]} wordLevelTimestamps - Array of words with their timestamps
+ * @param {number} [maxDuration=5.0] - Maximum duration of a caption in seconds
+ * @param {number} [targetWpm=170] - Target words per minute for reading speed
+ * @returns {Caption[]} Array of optimized captions
+ */
+function optimizeCaptions(wordLevelTimestamps, maxDuration = 5.0, targetWpm = 170) {
+    /** @type {Caption[]} */
+    const optimizedCaptions = [];
+    /** @type {Caption} */
+    let currentCaption = { text: "", start: 0, end: 0 };
+    let wordsInCaption = 0;
+
+    wordLevelTimestamps.forEach((word) => {
+        if (!currentCaption.text) {
+            currentCaption.start = word.offset / 10000000;
+        }
+
+        const duration = (word.offset + word.duration) / 10000000 - currentCaption.start;
+        wordsInCaption++;
+
+        if (duration > maxDuration || wordsInCaption > (targetWpm / 60) * maxDuration) {
+            optimizedCaptions.push(currentCaption);
+            currentCaption = { text: word.text, start: word.offset / 10000000, end: 0 };
+            wordsInCaption = 1;
+        } else {
+            currentCaption.text += currentCaption.text ? ` ${word.text}` : word.text;
+        }
+
+        currentCaption.end = (word.offset + word.duration) / 10000000;
+    });
+
+    if (currentCaption.text) {
+        optimizedCaptions.push(currentCaption);
+    }
+
+    return optimizedCaptions;
 }
 
 
@@ -290,12 +405,20 @@ function convertToWebVtt(transcription) {
  */
 
 async function convertPipeline(blobname) {
-    const audioStream = await downloadAudioFromAzure(blobname)
-    const recognitionResult = await transcribeAudio(audioStream)
-    console.log(recognitionResult)
-    const vttContent = convertToWebVtt(recognitionResult)
-    console.log(vttContent)
-    return vttContent
+
+    try {
+
+        const audioStream = await downloadAudioFromAzure(blobname)
+        const recognitionResult = await transcribeAudio(audioStream)
+        //if (recognitionResult.length > 0) {
+        //console.log(`Final Recognition Result:\n${recognitionResult}`)
+        //const vttContent = convertToWebVtt(recognitionResult)
+        //    console.log(vttContent)
+        //    return ree
+        //}
+    } catch (error) {
+        console.error(`Error converting WAV file ${error}`)
+    }
 
 }
 
@@ -365,6 +488,8 @@ async function fullPipeline(eventData) {
     }
 
 }
+
+
 
 
 function generateID(blockNumber) {
