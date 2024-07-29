@@ -1,7 +1,9 @@
 require('dotenv').config();
 
 const { EventHubConsumerClient, earliestEventPosition, latestEventPosition } = require("@azure/event-hubs");
-const { fullPipeline } = require('./audioController.js');
+const { fullPipeline, convertPipeline, uploadStreamToAzure } = require('./audioController.js');
+const fs = require('fs');
+const { PassThrough } = require('stream');
 
 //const connectionString = String(process.env.CONNECTIONSTRING);
 const eventHubName = "urls";
@@ -26,6 +28,15 @@ async function receiveMessages() {
                 else {
                     console.log('Executing Pipeline')
                     const metaData = fullPipeline(event.body)
+                    const [transcript, webVTT] = convertPipeline(metaData.filename)
+
+                    const webVTTStream = new PassThrough()
+                    webVTTStream.write(webVTT)
+                    webVTTStream.end()
+
+                    uploadStreamToAzure(metaData.filename, webVTTStream, 'videocaptions')
+
+
                     //console.log("Filname: ", metaData.filename)
                 }
 
