@@ -1,5 +1,5 @@
 const express = require('express')
-const upload = require('./multer_serverless.js')
+const upload = require('../upload/multer_serverless.js')
 
 const app = express()
 const port = 3000;
@@ -39,7 +39,7 @@ module.exports = {
     sendMessage
 }
 
-const { client, connect_to_DB, upload_by_chunks, upload_mongo_db } = require('./db_storage_transaction.js')
+const { client, connect_to_DB, upload_by_chunks, upload_mongo_db } = require('../upload/db_storage_transaction.js')
 //const { sendMessage } = require('./kafka_prod.js')
 console.log(`Trying to connect:`)
 //connect_to_DB(client)

@@ -25,10 +25,6 @@ const containerClient = blobServiceClient.getContainerClient(process.env.AUDIO_C
 
 
 
-
-
-
-
 /**
  * @class
  */
@@ -422,7 +418,7 @@ async function convertPipeline(blobname) {
 
             for (let i = 1; i < res[0].length; i++) {
                 //Regex that replaces every period with a new line excluding all those that separate acronyms,decimals,titles and the like
-                let format = res[0][i].text.replace(/(?<!\b[A-Z])(?<!\d)(?<!\b(?:Inc|Ltd|Jr|Dr|Ms|Mr|St|Ave|etc|e\.g|i\.e|a\.k|p\.m|a\.m))\.(?=\s|$)/g, '.\n\n');
+                let format = res[0][i].text.replace(/(?<!\b[A-Z])(?<!\d)(?<!\b(?:Inc|Ltd|Jr|Dr|Ms|Mr|St|Ave|etc|e\.g|i\.e|a\.k|p\.m|a\.m))\.(?=\s|$)/g, '.\n\n'); 
                 TranscriptBuilder += format
             }
 

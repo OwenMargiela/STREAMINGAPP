@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start:consumer": "nodemon ./kafka/consumer/index.js",
-    "start:server": "nodemon ./Server/index.js"
+    "start:upload_server": "nodemon ./app/index.js"
   },
   "keywords": [],
   "author": "",
