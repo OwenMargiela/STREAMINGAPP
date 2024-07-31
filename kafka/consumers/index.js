@@ -2,12 +2,14 @@ require('dotenv').config();
 
 const { EventHubConsumerClient, earliestEventPosition, latestEventPosition } = require("@azure/event-hubs");
 const { fullPipeline, convertPipeline, uploadStreamToAzure } = require('./audioController.js');
-const fs = require('fs');
-const { PassThrough } = require('stream');
 
 //const connectionString = String(process.env.CONNECTIONSTRING);
 const eventHubName = "urls";
 const consumerGroup = EventHubConsumerClient.defaultConsumerGroupName;
+
+const { TranscoderPipeline } = require('./videoController.js')
+const fs = require('fs');
+const { PassThrough } = require('stream');
 
 async function receiveMessages() {
     const consumerClient = new EventHubConsumerClient(consumerGroup, process.env.CONNECTIONSTRING, eventHubName);
@@ -27,14 +29,19 @@ async function receiveMessages() {
                 }
                 else {
                     console.log('Executing Pipeline')
-                    const metaData = fullPipeline(event.body)
-                    const [transcript, webVTT] = convertPipeline(metaData.filename)
 
-                    const webVTTStream = new PassThrough()
-                    webVTTStream.write(webVTT)
-                    webVTTStream.end()
+                    const readStream = new PassThrough()
+                    TranscoderPipeline(event.body)
 
-                    uploadStreamToAzure(metaData.filename, webVTTStream, 'videocaptions')
+                    //const metaData = fullPipeline(event.body)
+                    //const [transcript, webVTT] = convertPipeline(metaData.filename)
+
+                    //const webVTTStream = new PassThrough()
+                    //webVTTStream.write(webVTT)
+                    //webVTTStream.end()
+
+                    //uploadStreamToAzure(metaData.filename, webVTTStream, 'videocaptions')
+
 
 
                     //console.log("Filname: ", metaData.filename)
