@@ -10,6 +10,7 @@ const consumerGroup = EventHubConsumerClient.defaultConsumerGroupName;
 const { TranscoderPipeline } = require('./videoController.js')
 const fs = require('fs');
 const { PassThrough } = require('stream');
+const { error, log } = require('console');
 
 async function receiveMessages() {
     const consumerClient = new EventHubConsumerClient(consumerGroup, process.env.CONNECTIONSTRING, eventHubName);
@@ -30,21 +31,23 @@ async function receiveMessages() {
                 else {
                     console.log('Executing Pipeline')
 
-                    const readStream = new PassThrough()
                     TranscoderPipeline(event.body)
 
-                    //const metaData = fullPipeline(event.body)
-                    //const [transcript, webVTT] = convertPipeline(metaData.filename)
+                    try {
+                        const metaData = await fullPipeline(event.body)
+                        const [_, webVTT] = await convertPipeline(metaData.filename)
+                        if (webVTT) {
+                            console.log(webVTT)
+                            const webVTTStream = new PassThrough()
+                            webVTTStream.end(webVTT)
+                            const fileName = 'caption_for-' + metaData.filename.replace('.wav', '.vtt')
+                            uploadStreamToAzure(fileName, webVTTStream, 'videocaptions')
+                        }
 
-                    //const webVTTStream = new PassThrough()
-                    //webVTTStream.write(webVTT)
-                    //webVTTStream.end()
+                    } catch (error) {
+                        console.log(`Error uploading file to azure ${error}`)
+                    }
 
-                    //uploadStreamToAzure(metaData.filename, webVTTStream, 'videocaptions')
-
-
-
-                    //console.log("Filname: ", metaData.filename)
                 }
 
             }

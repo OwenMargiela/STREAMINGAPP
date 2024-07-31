@@ -4,7 +4,7 @@ const { pipeline, PassThrough, Readable } = require('stream')
 const ffmpeg = require('fluent-ffmpeg');
 
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-const { default: axios } = require('axios');
+const https = require('https')
 
 const fs = require('fs');
 
@@ -12,9 +12,7 @@ require('dotenv').config()
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const cognitiveService = require('microsoft-cognitiveservices-speech-sdk');
-const { rejects } = require("assert");
-const { error, log } = require("console");
-const { text } = require("express");
+
 
 const blobServiceClient = new _AZURE.BlobServiceClient(
     `https://${process.env.ACCOUNT_NAME}.blob.core.windows.net?${process.env.SAS_TOKEN}`
@@ -26,26 +24,10 @@ const containerClient = blobServiceClient.getContainerClient(process.env.AUDIO_C
 
 
 /**
- * @class
+ * @typedef {Object} FileMetaData
+ * @property {string} filename - The filename of the file.
+ * @property {string} dest - The destination path of the file.
  */
-
-class FileMetaData {
-    /**
-     * 
-     * @param {string} filename 
-     * @param {string} dest 
-     */
-    constructor(filename, dest) {
-        /**
-         * @type {string}
-         */
-        this.filename = filename
-        /**
-         * @type {string}
-         */
-        this.dest = dest
-    }
-}
 
 /**
  * @typedef {Object} WordLevelTimestamp
@@ -80,7 +62,9 @@ async function uploadStreamToAzure(filename, stream, dest) {
     console.log("filename type:", typeof filename);
 
     const blockIDs = [];
-    const blockBlobClient = containerClient.getBlockBlobClient(filename);
+    const captionContainerClient = blobServiceClient.getContainerClient(dest)
+    const blockBlobClient = captionContainerClient.getBlockBlobClient(filename);
+
 
     let blockNumber = 0;
     const blockSize = 4 * 1024 * 1024;
@@ -88,6 +72,10 @@ async function uploadStreamToAzure(filename, stream, dest) {
 
     stream.on('data', chunk => {
         bufferArray.push(chunk);
+    });
+
+    stream.on('error', (err) => {
+        console.error('Stream error:', err);
     });
 
     stream.on('end', async () => {
@@ -104,20 +92,17 @@ async function uploadStreamToAzure(filename, stream, dest) {
             offset += chunk.length;
         }
         await blockBlobClient.commitBlockList(blockIDs, {
-            blobHTTPHeaders: { blobContentType: 'audio/mpeg' } // Set the content type to audio/mpeg
+            blobHTTPHeaders: { blobContentType: 'text/vtt' }
         });
 
+        //console.log('File uploaded to:', file_URL);
         const file_URL = `https://${process.env.ACCOUNT_NAME}.blob.core.windows.net/${dest}/${filename}`;
-        console.log('File uploaded to:', file_URL);
-        return file_URL;
-    });
 
-    stream.on('error', (err) => {
-        console.error('Stream error:', err);
-    });
+        return new Promise((resolve, reject) => {
+            resolve(file_URL);
+        })
+    })
 }
-
-
 /**
  * @param {fs.ReadStream} input A readable stream object
  * @returns {PassThrough} Returns a transform Stream object with a writable end and a readable end
@@ -394,10 +379,16 @@ function formatTime(time) {
 
 
 /**
+ * @typedef {Object} ProcessedTranscript
+ * @param {string} rawText
+ * @param {string} webVTT
+ */
+
+/**
  * Produces a Script as well of a WebVTT file containing the video's audio contents 
  * in the form of text
  * @param {string} blobname -The name of the blob containing the disired audio content
- * @return {string[]}
+ * @return {Promise<string[]>}
 */
 
 async function convertPipeline(blobname) {
@@ -405,43 +396,55 @@ async function convertPipeline(blobname) {
     let TranscriptBuilder = ""
     let webVTT = ""
 
-    const audioStream = await downloadAudioFromAzure(blobname)
-    transcribeAudio(audioStream)
-        .then(res => {
-            console.log("Building File")
-            webVTT = WebVTTBuilder(res[1])
-            fs.writeFile('Script.txt', webVTT, (err) => {
-                if (err) {
-                    throw new Error("File not saved!")
-                }
-            })
+    /**
+     * @type {NodeJS.ReadableStream}
+     */
+    let audioStream
+    await downloadAudioFromAzure(blobname).then(res => {
+        audioStream = res
+    })
 
-            for (let i = 1; i < res[0].length; i++) {
-                //Regex that replaces every period with a new line excluding all those that separate acronyms,decimals,titles and the like
-                let format = res[0][i].text.replace(/(?<!\b[A-Z])(?<!\d)(?<!\b(?:Inc|Ltd|Jr|Dr|Ms|Mr|St|Ave|etc|e\.g|i\.e|a\.k|p\.m|a\.m))\.(?=\s|$)/g, '.\n\n'); 
-                TranscriptBuilder += format
-            }
+    if (audioStream) {
+        return new Promise((resolve, rejects) => {
 
-            const normalizeText = (text) => {
-                return text
-                    .split("\n") // Split the text into lines
-                    .map((line) => line.trimStart()) // Remove leading spaces from each line
-                    .join("\n"); // Join the lines back together
-            };
+            transcribeAudio(audioStream)
+                .then(res => {
+                    console.log("Building File")
+                    webVTT = WebVTTBuilder(res[1])
+                    fs.writeFile('Script.txt', webVTT, (err) => {
+                        if (err) {
+                            throw new Error("File not saved!")
+                        }
+                    })
 
-            fs.writeFile('Transcipt.txt', normalizeText(TranscriptBuilder), (err) => {
-                if (err) {
-                    throw new Error("File not saved!")
-                }
+                    for (let i = 1; i < res[0].length; i++) {
+                        //Regex that replaces every period with a new line excluding all those that separate acronyms,decimals,titles and the like
+                        let format = res[0][i].text.replace(/(?<!\b[A-Z])(?<!\d)(?<!\b(?:Inc|Ltd|Jr|Dr|Ms|Mr|St|Ave|etc|e\.g|i\.e|a\.k|p\.m|a\.m))\.(?=\s|$)/g, '.\n\n');
+                        TranscriptBuilder += format
+                    }
 
-            })
-            console.log("File Saved!")
+                    const normalizeText = (text) => {
+                        return text
+                            .split("\n") // Split the text into lines
+                            .map((line) => line.trimStart()) // Remove leading spaces from each line
+                            .join("\n"); // Join the lines back together
+                    };
+
+                    fs.writeFile('Transcipt.txt', normalizeText(TranscriptBuilder), (err) => {
+                        if (err) {
+                            throw new Error("File not saved!")
+                        }
+
+                    })
+                    console.log("File Saved!")
+                    resolve([TranscriptBuilder, webVTT])
+
+                })
+                .catch(err => rejects(`Error converting WAV file ${err}`))
+
 
         })
-        .catch(err => console.error(`Error converting WAV file ${err}`))
-    return [TranscriptBuilder, webVTT]
-
-
+    }
 }
 
 // Check if the script is run directly from the command line
@@ -463,44 +466,55 @@ if (require.main === module) {
 
 
 /**
-*Extracts the audio content of a video using its url.The audio is then uploaded to a storage bucket
-*@param {string} eventData Event produced by the eventhub stream containing the url of the uploded video
-*@return {FileMetaData | undefined}
-*/
-async function fullPipeline(eventData) {
-    console.log('In Pipeline')
-    let url = eventData
-    console.log(url)
-    let dest = 'audio'
-    console.log('Dest:', dest)
+ * Extracts the audio content of a video using its URL. The audio is then uploaded to a storage bucket.
+ * @param {string} url - The URL of the uploaded video.
+ * @return {Promise<FileMetaData>}
+ */
+async function fullPipeline(url) {
+    console.log('In Pipeline');
+    console.log(url);
+    const dest = 'audio';
+    console.log('Dest:', dest);
 
-    try {
-        const https = require('https')
-        const readStream = new PassThrough()
+    const readStream = new PassThrough();
 
-        https.get(url, (res) => {
-            res.pipe(readStream);
-            readStream.on('finish', () => {
-                console.log("File Downloded")
-            }).on('error', (err) => {
-                console.error('Error downloading file:', err)
-            })
-        })
-        const audioStream = extractAudio(readStream);
 
-        if (audioStream) {
-            const urlparts = url.split('/')[4].split("")
-            urlparts.splice(urlparts.length - 3, 3)
-            const filename = urlparts.join('') + "wav"
-            //console.log("Filename:", filename)
-            await uploadStreamToAzure(filename, audioStream, dest)
-            const fileMetaData = new FileMetaData(filename, dest)
-            return fileMetaData
+    https.get(url, (res) => {
+        res.pipe(readStream);
+        res.on('error', (err) => {
+            console.error('Error with HTTP request:', err);
+            reject(err);
+        });
+    }).on('error', (err) => {
+        console.error('Error with HTTP request:', err);
+        reject(err);
+    });
 
-        }
-    } catch (error) {
-        console.error(`${error}`)
-    }
+    readStream.on('finish', () => {
+        console.log("File Downloaded");
+    }).on('error', (err) => {
+        console.error('Error downloading file:', err);
+    });
+
+    // Extract audio from the stream
+    console.log("extracting audio")
+    const audioStream = extractAudio(readStream);
+
+    // Assuming extractAudio always returns a valid stream
+    const urlparts = url.split('/')[4].split("");
+    urlparts.splice(urlparts.length - 3, 3);
+    const filename = urlparts.join('') + "wav";
+
+    // Upload audio stream to Azure
+    uploadStreamToAzure(filename, audioStream, dest)
+
+    /**
+     * @type {FileMetaData}
+     */
+    const file = { filename: filename, dest: dest };
+    //console.log(file)
+    return file
+
 
 }
 

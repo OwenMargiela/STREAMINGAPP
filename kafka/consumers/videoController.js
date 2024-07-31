@@ -99,6 +99,9 @@ async function Transcoder(videoBuffer) {
 }
 
 /**
+ * Full transcoder Pipeline: Downloads the video from the URL into a buffer. Transcodes a video buffer to HLS format 
+ * and uploads to a storage blob
+ * 
  *@param {string} url
  */
 function TranscoderPipeline(url) {
