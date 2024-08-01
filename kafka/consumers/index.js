@@ -1,5 +1,4 @@
 require('dotenv').config();
-
 const { EventHubConsumerClient, earliestEventPosition, latestEventPosition } = require("@azure/event-hubs");
 const { fullPipeline, convertPipeline, uploadStreamToAzure } = require('./audioController.js');
 
@@ -8,9 +7,12 @@ const eventHubName = "urls";
 const consumerGroup = EventHubConsumerClient.defaultConsumerGroupName;
 
 const { TranscoderPipeline } = require('./videoController.js')
-const fs = require('fs');
 const { PassThrough } = require('stream');
-const { error, log } = require('console');
+
+const Producer = require('../producer/producer.js');
+
+
+
 
 async function receiveMessages() {
     const consumerClient = new EventHubConsumerClient(consumerGroup, process.env.CONNECTIONSTRING, eventHubName);
@@ -25,24 +27,25 @@ async function receiveMessages() {
                 }
 
                 console.log(`Received event: ${event.body}`);
+                /*
                 if (event.body === undefined) {
                     console.log("event data is undefined, Pipeline will not be executed")
                 }
                 else {
                     console.log('Executing Pipeline')
-
-                    TranscoderPipeline(event.body)
-
-                    try {
-                        const metaData = await fullPipeline(event.body)
-                        const [_, webVTT] = await convertPipeline(metaData.filename)
-                        if (webVTT) {
-                            console.log(webVTT)
-                            const webVTTStream = new PassThrough()
-                            webVTTStream.end(webVTT)
-                            const fileName = 'caption_for-' + metaData.filename.replace('.wav', '.vtt')
-                            uploadStreamToAzure(fileName, webVTTStream, 'videocaptions')
-                        }
+                
+                TranscoderPipeline(event.body)
+                
+                try {
+                    const metaData = await fullPipeline(event.body)
+                    const [_, webVTT] = await convertPipeline(metaData.filename)
+                    if (webVTT) {
+                        console.log(webVTT)
+                        const webVTTStream = new PassThrough()
+                        webVTTStream.end(webVTT)
+                        const fileName = 'caption_for-' + metaData.filename.replace('.wav', '.vtt')
+                        uploadStreamToAzure(fileName, webVTTStream, 'videocaptions')
+                    }
 
                     } catch (error) {
                         console.log(`Error uploading file to azure ${error}`)
@@ -50,6 +53,7 @@ async function receiveMessages() {
 
                 }
 
+                */
             }
         },
         processError: async (err, context) => {

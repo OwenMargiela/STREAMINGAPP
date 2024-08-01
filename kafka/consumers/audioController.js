@@ -1,26 +1,23 @@
-const _AZURE = require("@azure/storage-blob")
+require('dotenv').config()
 
-const { pipeline, PassThrough, Readable } = require('stream')
-const ffmpeg = require('fluent-ffmpeg');
+const https = require('https')
+const fs = require('fs');
+const { pipeline, PassThrough, } = require('stream')
+
+
 
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-const https = require('https')
-
-const fs = require('fs');
-
-require('dotenv').config()
+const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
+const _AZURE = require("@azure/storage-blob")
+
 const cognitiveService = require('microsoft-cognitiveservices-speech-sdk');
-
-
 const blobServiceClient = new _AZURE.BlobServiceClient(
     `https://${process.env.ACCOUNT_NAME}.blob.core.windows.net?${process.env.SAS_TOKEN}`
-
 )
 
 const containerClient = blobServiceClient.getContainerClient(process.env.AUDIO_CONTAINER_NAME)
-
 
 
 /**
@@ -37,15 +34,11 @@ const containerClient = blobServiceClient.getContainerClient(process.env.AUDIO_C
  * 
  */
 
-
-
 /**
  *@typedef {Object} TranscribedAudioResults
  * @property {WordLevelTimestamp[]} timestamps
  * @property {cognitiveService.SpeechRecognitionResult[]} speechResults
  */
-
-
 
 
 /**
@@ -103,6 +96,7 @@ async function uploadStreamToAzure(filename, stream, dest) {
         })
     })
 }
+
 /**
  * @param {fs.ReadStream} input A readable stream object
  * @returns {PassThrough} Returns a transform Stream object with a writable end and a readable end
@@ -411,32 +405,18 @@ async function convertPipeline(blobname) {
                 .then(res => {
                     console.log("Building File")
                     webVTT = WebVTTBuilder(res[1])
-                    fs.writeFile('Script.txt', webVTT, (err) => {
-                        if (err) {
-                            throw new Error("File not saved!")
-                        }
-                    })
 
                     for (let i = 1; i < res[0].length; i++) {
                         //Regex that replaces every period with a new line excluding all those that separate acronyms,decimals,titles and the like
                         let format = res[0][i].text.replace(/(?<!\b[A-Z])(?<!\d)(?<!\b(?:Inc|Ltd|Jr|Dr|Ms|Mr|St|Ave|etc|e\.g|i\.e|a\.k|p\.m|a\.m))\.(?=\s|$)/g, '.\n\n');
                         TranscriptBuilder += format
                     }
-
                     const normalizeText = (text) => {
                         return text
                             .split("\n") // Split the text into lines
                             .map((line) => line.trimStart()) // Remove leading spaces from each line
                             .join("\n"); // Join the lines back together
                     };
-
-                    fs.writeFile('Transcipt.txt', normalizeText(TranscriptBuilder), (err) => {
-                        if (err) {
-                            throw new Error("File not saved!")
-                        }
-
-                    })
-                    console.log("File Saved!")
                     resolve([TranscriptBuilder, webVTT])
 
                 })

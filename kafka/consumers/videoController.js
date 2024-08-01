@@ -2,7 +2,6 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const path = require('path');
 const https = require('https');
-const { PassThrough } = require('stream');
 
 /**
  * Downloads the video from the URL into a buffer.
@@ -25,7 +24,6 @@ async function downloadVideoToBuffer(url) {
  * @param {Buffer} videoBuffer - The video buffer to transcode.
  */
 async function Transcoder(videoBuffer) {
-    // Create the output directory if it does not exist
     const outputDir = 'stream-pipe-output_hls';
     if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir);
